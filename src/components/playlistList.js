@@ -10,6 +10,7 @@ export default function PlaylistList() {
   const [error, setError] = useState(null);
   const [highlight, setHighlight] = useState(false);
   const [userTracks, setUserTracks] = useState([]);
+  const [isChecking, setIsChecking] = useState(false); // 状態を管理
 
   useEffect(() => {
     fetch("/api/playlists")
@@ -35,6 +36,14 @@ export default function PlaylistList() {
     fetchUserTracks();
   }, []);
 
+  const handleCheckSequentially = async (playlistIds) => {
+    setIsChecking(true); // 処理開始
+    for (const playlistId of playlistIds) {
+      await handleCheck(playlistId);
+    }
+    setIsChecking(false); // 処理終了
+  };
+
   const handleCheck = async (playlistId) => {
     const response = await fetch(
       `/api/playlist-tracks?playlistId=${playlistId}`
@@ -50,7 +59,7 @@ export default function PlaylistList() {
           url: track.track.external_urls.spotify,
           playlistId,
           isPlayable: track.track.is_playable,
-          image_url: track.track.album.images[0].url,
+          image_url: track.track.album.images?.[0]?.url ?? "",
         }));
 
         // 重複を除外して追加
@@ -137,6 +146,15 @@ export default function PlaylistList() {
         }}
       >
         <h2>プレイリスト一覧</h2>
+        <div>
+          <button
+            onClick={() => handleCheckSequentially(playlists.map((p) => p.id))}
+            disabled={isChecking}
+          >
+            {isChecking ? "チェック中..." : "すべてチェック"}
+          </button>
+          {isChecking && <p>処理中です。しばらくお待ちください...</p>}
+        </div>
         {playlists.map((playlist) => (
           <div key={playlist.id}>
             <h3>{playlist.name}</h3>
