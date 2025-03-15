@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { UnplayableTrackList } from "./UnplayableTrackList";
 import { getSession } from "next-auth/react";
+import { v4 as uuidv4 } from "uuid"; // 追加
 
 export default function PlaylistList() {
   const [unplayableTracks, setUnplayableTracks] = useState([]);
@@ -71,17 +72,19 @@ export default function PlaylistList() {
   const handleUpload = async () => {
     const session = await getSession();
     if (!session || !session.user) {
-      console.error("ユーザー情報が取得できませんでした。");
+      alert("ユーザー情報が取得できませんでした。ログインしてください。");
       return;
     }
+
     const registeredUrls = new Set(userTracks.map((track) => track.url));
 
     const tracksToUpload = unplayableTracks
       .filter((track) => !registeredUrls.has(track.url))
       .map((track) => ({
-        user: session.user.name, // Spotifyのユーザー名
+        id: uuidv4(),
+        user: session.user.name,
         name: track.name,
-        artist: track.artist,
+        artist: `{${track.artist.join(",")}}`, // Supabase ARRAY 型対応
         album: track.album,
         url: track.url,
         playlistId: track.playlistId,
@@ -90,32 +93,36 @@ export default function PlaylistList() {
       }));
 
     if (tracksToUpload.length === 0) {
-      console.log(
-        "全てのトラックがすでに登録されています。アップロードをスキップします。"
-      );
+      alert("すでに登録済みのトラックです。アップロードをスキップします。");
       return;
     }
 
     const response = await fetch("/api/upload-tracks", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(tracksToUpload),
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ tracks: tracksToUpload }),
     });
 
     if (response.ok) {
       console.log("データベースに登録されました。");
 
-      // サーバーから新しいデータを取得し、即時反映
-      const updatedTracks = await fetch("/api/user-tracks").then((res) =>
-        res.json()
-      );
-      setUserTracks(updatedTracks);
+      try {
+        const updatedTracks = await fetch("/api/user-tracks").then((res) =>
+          res.json()
+        );
+        setUserTracks(updatedTracks);
+      } catch (error) {
+        console.error("登録後のデータ取得に失敗しました:", error);
+      }
 
-      // unplayableTracks もリセット
       setUnplayableTracks([]);
     } else {
       console.error("登録に失敗しました。", await response.text());
     }
+    console.log("送信データ:", JSON.stringify(tracksToUpload, null, 2));
   };
 
   return (
@@ -163,7 +170,7 @@ export default function PlaylistList() {
       >
         <UnplayableTrackList tracks={unplayableTracks} />
         {unplayableTracks.length > 0 && (
-          <button onClick={handleUpload}>データベースに登録</button>
+          <button onClick={handleUpload}>データベースに保存</button>
         )}
       </div>
     </div>
@@ -172,13 +179,15 @@ export default function PlaylistList() {
 
 function UserTracks({ tracks }) {
   const sortedTracks = [...tracks].sort(
-    (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    (a, b) =>
+      new Date(b.createdAt ?? Date.now()) - new Date(a.createdAt ?? Date.now())
   );
+
   return (
     <div>
-      <h2>登録済みの再生不可トラック</h2>
-      {tracks.length === 0 ? (
-        <p>登録されたトラックはありません。</p>
+      <h2>保存済み</h2>
+      {sortedTracks.length === 0 ? (
+        <p>保存無し。</p>
       ) : (
         <ul>
           {sortedTracks.map((track) => (
@@ -215,8 +224,13 @@ function UserTracks({ tracks }) {
               >
                 {track.name}
               </a>{" "}
-              - {track.artist.join(", ")} - {track.artist.join(", ")} (
-              {new Date(track.createdAt).toLocaleString()})
+              - {track.artist.join(", ")} (
+              {track.createdAt
+                ? new Date(track.createdAt).toLocaleString("ja-JP", {
+                    timeZone: "Asia/Tokyo",
+                  })
+                : "N/A"}
+              )
             </li>
           ))}
         </ul>
