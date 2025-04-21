@@ -219,16 +219,18 @@ function UserTracks({ tracks }) {
               }}
             >
               {track.image_url && (
-                <img
-                  src={track.image_url}
-                  alt={track.name}
-                  style={{
-                    width: "50px",
-                    height: "50px",
-                    objectFit: "cover",
-                    borderRadius: "5px",
-                  }}
-                />
+                <a href={track.url} target="_blank" rel="noopener noreferrer">
+                  <img
+                    src={track.image_url}
+                    alt={track.name}
+                    style={{
+                      width: "50px",
+                      height: "50px",
+                      objectFit: "cover",
+                      borderRadius: "5px",
+                    }}
+                  />
+                </a>
               )}
               <a
                 href={track.url}
@@ -240,7 +242,14 @@ function UserTracks({ tracks }) {
                   fontWeight: "bold",
                 }}
               >
-                {track.name}
+                {track.name}{" "}
+                <font size="2" color="white">
+                  open in
+                </font>
+                <img
+                  src="https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_White.png"
+                  style={{ height: "1em", verticalAlign: "middle" }}
+                />
               </a>{" "}
               - {track.artist.join(", ")} (
               {track.createdAt
