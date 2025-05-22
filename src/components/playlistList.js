@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { UnplayableTrackList } from "./UnplayableTrackList";
 import { getSession } from "next-auth/react";
+import { v4 as uuidv4 } from "uuid"; // 追加
 
 export default function PlaylistList() {
   const [unplayableTracks, setUnplayableTracks] = useState([]);
@@ -9,6 +10,7 @@ export default function PlaylistList() {
   const [error, setError] = useState(null);
   const [highlight, setHighlight] = useState(false);
   const [userTracks, setUserTracks] = useState([]);
+  const [isChecking, setIsChecking] = useState(false); // 状態を管理
 
   useEffect(() => {
     fetch("/api/playlists")
@@ -34,6 +36,14 @@ export default function PlaylistList() {
     fetchUserTracks();
   }, []);
 
+  const handleCheckSequentially = async (playlistIds) => {
+    setIsChecking(true); // 処理開始
+    for (const playlistId of playlistIds) {
+      await handleCheck(playlistId);
+    }
+    setIsChecking(false); // 処理終了
+  };
+
   const handleCheck = async (playlistId) => {
     const response = await fetch(
       `/api/playlist-tracks?playlistId=${playlistId}`
@@ -49,7 +59,7 @@ export default function PlaylistList() {
           url: track.track.external_urls.spotify,
           playlistId,
           isPlayable: track.track.is_playable,
-          image_url: track.track.album.images[0].url,
+          image_url: track.track.album.images?.[0]?.url ?? "",
         }));
 
         // 重複を除外して追加
@@ -71,17 +81,19 @@ export default function PlaylistList() {
   const handleUpload = async () => {
     const session = await getSession();
     if (!session || !session.user) {
-      console.error("ユーザー情報が取得できませんでした。");
+      alert("ユーザー情報が取得できませんでした。ログインしてください。");
       return;
     }
+
     const registeredUrls = new Set(userTracks.map((track) => track.url));
 
     const tracksToUpload = unplayableTracks
       .filter((track) => !registeredUrls.has(track.url))
       .map((track) => ({
-        user: session.user.name, // Spotifyのユーザー名
+        id: uuidv4(),
+        user: session.user.name,
         name: track.name,
-        artist: track.artist,
+        artist: `{${track.artist.join(",")}}`, // Supabase ARRAY 型対応
         album: track.album,
         url: track.url,
         playlistId: track.playlistId,
@@ -90,32 +102,36 @@ export default function PlaylistList() {
       }));
 
     if (tracksToUpload.length === 0) {
-      console.log(
-        "全てのトラックがすでに登録されています。アップロードをスキップします。"
-      );
+      alert("すでに登録済みのトラックです。アップロードをスキップします。");
       return;
     }
 
     const response = await fetch("/api/upload-tracks", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(tracksToUpload),
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ tracks: tracksToUpload }),
     });
 
     if (response.ok) {
       console.log("データベースに登録されました。");
 
-      // サーバーから新しいデータを取得し、即時反映
-      const updatedTracks = await fetch("/api/user-tracks").then((res) =>
-        res.json()
-      );
-      setUserTracks(updatedTracks);
+      try {
+        const updatedTracks = await fetch("/api/user-tracks").then((res) =>
+          res.json()
+        );
+        setUserTracks(updatedTracks);
+      } catch (error) {
+        console.error("登録後のデータ取得に失敗しました:", error);
+      }
 
-      // unplayableTracks もリセット
       setUnplayableTracks([]);
     } else {
       console.error("登録に失敗しました。", await response.text());
     }
+    console.log("送信データ:", JSON.stringify(tracksToUpload, null, 2));
   };
 
   return (
@@ -130,6 +146,15 @@ export default function PlaylistList() {
         }}
       >
         <h2>プレイリスト一覧</h2>
+        <div>
+          <button
+            onClick={() => handleCheckSequentially(playlists.map((p) => p.id))}
+            disabled={isChecking}
+          >
+            {isChecking ? "チェック中..." : "すべてチェック"}
+          </button>
+          {isChecking && <p>処理中です。しばらくお待ちください...</p>}
+        </div>
         {playlists.map((playlist) => (
           <div key={playlist.id}>
             <h3>{playlist.name}</h3>
@@ -163,7 +188,7 @@ export default function PlaylistList() {
       >
         <UnplayableTrackList tracks={unplayableTracks} />
         {unplayableTracks.length > 0 && (
-          <button onClick={handleUpload}>データベースに登録</button>
+          <button onClick={handleUpload}>データベースに保存</button>
         )}
       </div>
     </div>
@@ -172,13 +197,15 @@ export default function PlaylistList() {
 
 function UserTracks({ tracks }) {
   const sortedTracks = [...tracks].sort(
-    (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    (a, b) =>
+      new Date(b.createdAt ?? Date.now()) - new Date(a.createdAt ?? Date.now())
   );
+
   return (
     <div>
-      <h2>登録済みの再生不可トラック</h2>
-      {tracks.length === 0 ? (
-        <p>登録されたトラックはありません。</p>
+      <h2>保存済み</h2>
+      {sortedTracks.length === 0 ? (
+        <p>保存無し。</p>
       ) : (
         <ul>
           {sortedTracks.map((track) => (
@@ -192,16 +219,18 @@ function UserTracks({ tracks }) {
               }}
             >
               {track.image_url && (
-                <img
-                  src={track.image_url}
-                  alt={track.name}
-                  style={{
-                    width: "50px",
-                    height: "50px",
-                    objectFit: "cover",
-                    borderRadius: "5px",
-                  }}
-                />
+                <a href={track.url} target="_blank" rel="noopener noreferrer">
+                  <img
+                    src={track.image_url}
+                    alt={track.name}
+                    style={{
+                      width: "50px",
+                      height: "50px",
+                      objectFit: "cover",
+                      borderRadius: "5px",
+                    }}
+                  />
+                </a>
               )}
               <a
                 href={track.url}
@@ -213,10 +242,22 @@ function UserTracks({ tracks }) {
                   fontWeight: "bold",
                 }}
               >
-                {track.name}
+                {track.name}{" "}
+                <font size="2" color="white">
+                  open in
+                </font>
+                <img
+                  src="https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_White.png"
+                  style={{ height: "1em", verticalAlign: "middle" }}
+                />
               </a>{" "}
-              - {track.artist.join(", ")} - {track.artist.join(", ")} (
-              {new Date(track.createdAt).toLocaleString()})
+              - {track.artist.join(", ")} (
+              {track.createdAt
+                ? new Date(track.createdAt).toLocaleString("ja-JP", {
+                    timeZone: "Asia/Tokyo",
+                  })
+                : "N/A"}
+              )
             </li>
           ))}
         </ul>

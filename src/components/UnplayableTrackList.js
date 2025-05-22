@@ -2,7 +2,7 @@ export function UnplayableTrackList({ tracks }) {
   //   console.log(tracks);
   return (
     <div>
-      <h2>登録待ち:{tracks.length}</h2>
+      <h2>保存待ち:{tracks.length}</h2>
       <ul>
         {tracks.map((track) => (
           <li key={track.id}>
